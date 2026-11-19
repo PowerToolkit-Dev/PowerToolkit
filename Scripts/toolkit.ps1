@@ -4,9 +4,12 @@ $scriptDir = $PSScriptRoot
 Write-Host "==========================================================================================" -ForegroundColor Cyan
 Write-Host "                                POWERSHELL TOOLKIT DASHBOARD                              " -ForegroundColor Cyan
 Write-Host "==========================================================================================" -ForegroundColor Cyan
-Write-Host "Directory: $scriptDir" -ForegroundColor DarkGray
+$verFile = Join-Path $scriptDir "version.txt"
+$toolkitVersion = if (Test-Path $verFile) { (Get-Content $verFile -Raw).Trim() } else { "unknown" }
+Write-Host "Version: $toolkitVersion   |   Directory: $scriptDir" -ForegroundColor DarkGray
 Write-Host "Shortcuts: Type 'T' or 'home' for Dashboard  |  Type 'h' or 'history' for Command History`n" -ForegroundColor DarkGray
 Write-Host "To remove the toolkit, type 'uninstall' - don't delete this folder by hand, it won't undo your PATH or execution policy changes.`n" -ForegroundColor DarkYellow
+Write-Host "To check for a new version, type 'update' (it only connects to GitHub when you run it).`n" -ForegroundColor DarkYellow
 
 # Built-in description registry
 $defaults = @{

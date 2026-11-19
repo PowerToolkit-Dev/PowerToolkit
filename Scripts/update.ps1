@@ -105,7 +105,30 @@ try {
         Copy-Item -Path $newFile -Destination $file.FullName -Force
         $updated += $file.Name
     }
+    # Remove scripts retired in this release (backed up first). A value means "replaced by".
+    $retired = @{
+        'sudoon.ps1'          = $null
+        'sudooff.ps1'         = $null
+        'battery-monitor.ps1' = $null
+        'sudo.ps1'            = $null
+        'history.ps1'         = 'cmdlog.ps1'
+    }
+    foreach ($oldName in $retired.Keys) {
+        $old = Join-Path $InstallDir $oldName
+        if (-not (Test-Path $old)) { continue }
 
+        Copy-Item -Path $old -Destination (Join-Path $backup $oldName) -Force
+        Remove-Item -Path $old -Force
+
+        $newName = $retired[$oldName]
+        if ($newName -and (Test-Path (Join-Path $src $newName))) {
+            Copy-Item -Path (Join-Path $src $newName) -Destination (Join-Path $InstallDir $newName) -Force
+            $updated += $newName
+            Write-Host "Replaced $oldName with $newName" -ForegroundColor DarkGray
+        } else {
+            Write-Host "Removed retired script: $oldName" -ForegroundColor DarkGray
+        }
+    }
     Get-ChildItem -Path $InstallDir -Filter '*.ps1' -File | Unblock-File -ErrorAction SilentlyContinue
     Set-Content -Path $VersionFile -Value $remoteText -Encoding ASCII
 

@@ -16,6 +16,20 @@ function Get-AvailableCommands {
     }
     return $map
 }
+function Get-EditorCommand {
+    # 1. User's own choice (set with: setx EDITOR code)
+    foreach ($name in @($env:VISUAL, $env:EDITOR)) {
+        if ($name -and (Get-Command $name -ErrorAction SilentlyContinue)) {
+            return @{ Cmd = $name; Args = @() }
+        }
+    }
+    # 2. VS Code, if installed (--wait makes UnderHood pause until you close the file)
+    if (Get-Command code -ErrorAction SilentlyContinue) {
+        return @{ Cmd = 'code'; Args = @('--wait') }
+    }
+    # 3. Always available
+    return @{ Cmd = 'notepad.exe'; Args = @() }
+}
 
 $commandMap = Get-AvailableCommands
 
@@ -137,7 +151,8 @@ while ($true) {
     $action = Read-Action
     switch ($action) {
         "edit" {
-            Start-Process -FilePath "notepad.exe" -ArgumentList "`"$scriptPath`"" -Wait
+            $ed = Get-EditorCommand
+            Start-Process -FilePath $ed.Cmd -ArgumentList (@($ed.Args) + "`"$scriptPath`"") -Wait
         }
         "test" {
             Test-Script

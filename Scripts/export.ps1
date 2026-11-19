@@ -11,6 +11,27 @@ Write-Host "          PLUG & PLAY TOOLKIT EXPORT                       " -Foregr
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 
+$installDir = $PSScriptRoot
+$packageDir = Join-Path $installDir "package"
+
+# The installer saves its own files into "package" when you run it.
+if (-not (Test-Path (Join-Path $packageDir "install.ps1"))) {
+    Write-Host "Export needs the installer files, and this install doesn't have them yet." -ForegroundColor Red
+    Write-Host "Run the toolkit installer once more (Install-Toolkit.bat), then try 'export' again." -ForegroundColor Yellow
+    return
+}
+
+# Work out the version for the folder name
+$version = ""
+foreach ($vf in @((Join-Path $installDir "version.txt"), (Join-Path $packageDir "version.txt"))) {
+    if (Test-Path $vf) {
+        $version = ((Get-Content $vf -Raw) -replace '[^\w\.\-]', '')
+        break
+    }
+}
+if ([string]::IsNullOrWhiteSpace($version)) { $version = "unknown" }
+$folderName = "PowerShell-Toolkit-v$version"
+
 # Confirmation 1
 $c1 = Read-Host "Export plug-and-play installer to your Desktop? [Y/N]"
 if ($c1 -notmatch '^[Yy]$') {
@@ -19,7 +40,7 @@ if ($c1 -notmatch '^[Yy]$') {
 }
 
 # Confirmation 2
-$c2 = Read-Host "Confirm: build 'PowerShell-Toolkit' folder on Desktop? [Y/N]"
+$c2 = Read-Host "Confirm: build '$folderName' folder on Desktop? [Y/N]"
 if ($c2 -notmatch '^[Yy]$') {
     Write-Host "Cancelled on second confirmation." -ForegroundColor DarkGray
     return
@@ -29,99 +50,63 @@ if ($c2 -notmatch '^[Yy]$') {
 $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
 if (-not (Test-Path $desktop)) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
 
-$exportRoot = Join-Path $desktop "PowerShell-Toolkit"
+$exportRoot    = Join-Path $desktop $folderName
 $exportScripts = Join-Path $exportRoot "Scripts"
 
-Write-Host "`nBuilding plug-and-play export folder..." -ForegroundColor Yellow
+# Never delete a folder that isn't clearly an old export of this toolkit
+if (Test-Path $exportRoot) {
+    $looksLikeExport = (Test-Path (Join-Path $exportRoot "install.ps1")) -and (Test-Path (Join-Path $exportRoot "Scripts"))
+    if (-not $looksLikeExport) {
+        Write-Host "A folder named '$exportRoot' already exists and doesn't look like a toolkit export." -ForegroundColor Red
+        Write-Host "Not touching it. Rename or move it, then try again." -ForegroundColor Yellow
+        return
+    }
+    $replace = Read-Host "An export with this name already exists. Replace it? [Y/N]"
+    if ($replace -notmatch '^[Yy]$') {
+        Write-Host "Cancelled. Nothing was changed." -ForegroundColor DarkGray
+        return
+    }
+    Remove-Item $exportRoot -Recurse -Force
+}
 
-# Fresh export folder each time
-if (Test-Path $exportRoot) { Remove-Item $exportRoot -Recurse -Force }
+Write-Host "`nBuilding plug-and-play export folder..." -ForegroundColor Yellow
 New-Item -ItemType Directory -Path $exportScripts -Force | Out-Null
 
 # ------------------------------------------------------------
-# 1. Copy every tool script over as-is (no encoding, fully readable)
+# 1. Copy every installed script (not the uninstaller copy)
 # ------------------------------------------------------------
-$allScripts = Get-ChildItem -Path $PSScriptRoot -Filter "*.ps1" -File
+$allScripts = Get-ChildItem -Path $installDir -Filter "*.ps1" -File |
+    Where-Object { $_.Name -ine "uninstall.ps1" }
 foreach ($s in $allScripts) {
     Copy-Item -Path $s.FullName -Destination (Join-Path $exportScripts $s.Name) -Force
 }
 Write-Host "  -> Copied $($allScripts.Count) scripts to Scripts\" -ForegroundColor DarkGray
 
 # ------------------------------------------------------------
-# 2. Write the plain-text installer (install.ps1)
+# 2. Copy the real installer files saved by the installer
 # ------------------------------------------------------------
-$installLines = @'
-<#
-.SYNOPSIS
-    Installs the PowerShell Toolkit into your user AppData folder and adds
-    it to your PATH.
-.DESCRIPTION
-    Copies every .ps1 file from the "Scripts" folder next to this installer
-    into %LOCALAPPDATA%\PowerToolkit, then adds that folder to your user
-    PATH. Nothing here is hidden or encoded - open this file in any text
-    editor to see exactly what it does. No admin rights needed - this only
-    touches your own user profile, never C:\ system folders.
-#>
-
-$target = Join-Path $env:LOCALAPPDATA "PowerToolkit"
-$sourceDir = Join-Path $PSScriptRoot "Scripts"
-
-Clear-Host
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "        INSTALLING POWERSHELL TOOLKIT (PLUG & PLAY)        " -ForegroundColor Cyan
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host ""
-
-if (-not (Test-Path $sourceDir)) {
-    Write-Host "ERROR: Could not find the 'Scripts' folder next to this installer." -ForegroundColor Red
-    Write-Host "Expected it at: $sourceDir" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
+foreach ($f in @("install.ps1", "Uninstall.ps1", "Install-Toolkit.bat", "Uninstall-Toolkit.bat", "version.txt")) {
+    $p = Join-Path $packageDir $f
+    if (Test-Path $p) {
+        Copy-Item -Path $p -Destination (Join-Path $exportRoot $f) -Force
+        Write-Host "  -> Copied $f" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  -> Missing $f (skipped)" -ForegroundColor Yellow
+    }
 }
 
-if (-not (Test-Path $target)) {
-    New-Item -ItemType Directory -Path $target -Force | Out-Null
+# 3. Stamp the export with the version that is installed right now
+$currentVersionFile = Join-Path $installDir "version.txt"
+if (Test-Path $currentVersionFile) {
+    Copy-Item -Path $currentVersionFile -Destination (Join-Path $exportRoot "version.txt") -Force
 }
-
-$currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($currentPath -split ";" -notcontains $target) {
-    [Environment]::SetEnvironmentVariable("Path", "$currentPath;$target", "User")
-    $env:Path += ";$target"
-    Write-Host "Configured Windows PATH variable." -ForegroundColor Green
-}
-
-Get-ChildItem -Path $sourceDir -Filter "*.ps1" -File | ForEach-Object {
-    Copy-Item -Path $_.FullName -Destination (Join-Path $target $_.Name) -Force
-    Write-Host "  -> Installed: $($_.Name)" -ForegroundColor DarkGray
-}
-
-Write-Host "`nInstallation Successful! Launching dashboard..." -ForegroundColor Green
-Start-Sleep -Seconds 1
-& "$target\toolkit.ps1"
-'@
-
-Set-Content -Path (Join-Path $exportRoot "install.ps1") -Value $installLines -Encoding UTF8 -Force
-Write-Host "  -> Wrote install.ps1" -ForegroundColor DarkGray
-
-# ------------------------------------------------------------
-# 3. Write the double-click launcher (Install-Toolkit.bat)
-#    Just calls install.ps1 in PowerShell - no hidden payload,
-#    no marker parsing, no Invoke-Expression.
-# ------------------------------------------------------------
-$batLines = @(
-    '@echo off',
-    'title Installing PowerShell Toolkit...',
-    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"'
-)
-[System.IO.File]::WriteAllLines((Join-Path $exportRoot "Install-Toolkit.bat"), $batLines)
-Write-Host "  -> Wrote Install-Toolkit.bat" -ForegroundColor DarkGray
 
 Write-Host ""
 Write-Host "Plug & Play Export Created!" -ForegroundColor Green
 Write-Host "Folder: $exportRoot" -ForegroundColor Cyan
-Write-Host "Send the whole 'PowerShell-Toolkit' folder (zip it first) - the .bat" -ForegroundColor DarkGray
+Write-Host "Send the whole '$folderName' folder (zip it first) - Install-Toolkit.bat" -ForegroundColor DarkGray
 Write-Host "needs its Scripts\ folder sitting right next to it to work." -ForegroundColor DarkGray
 Write-Host "Opening File Explorer..." -ForegroundColor DarkGray
 
 Start-Sleep -Milliseconds 500
-explorer.exe $exportRoot
+Start-Process explorer.exe -ArgumentList "`"$exportRoot`""

@@ -83,8 +83,10 @@ if ($available.Count -eq 0) {
 # ------------------------------------------------------------
 # 2. Build the checklist GUI
 # ------------------------------------------------------------
-$form = New-Object System.Windows.Forms.Form
-$form.Text = "Power Toolkit Installer"
+$pkgVersion = ""
+$vf = Join-Path $PSScriptRoot "version.txt"
+if (Test-Path $vf) { $pkgVersion = " v" + (Get-Content $vf -Raw).Trim() }
+$form.Text = "Power Toolkit Installer$pkgVersion"
 $form.Size = New-Object System.Drawing.Size(560, 520)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
@@ -178,7 +180,15 @@ if ($currentPath -split ";" -notcontains $InstallDir) {
     [Environment]::SetEnvironmentVariable("Path", "$currentPath;$InstallDir", "User")
     $env:Path += ";$InstallDir"
 }
-
+# Save copies of any scripts about to be overwritten (keeps edits made in UnderHood)
+$backupDir = Join-Path $InstallDir ("backup\pre-install-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+foreach ($name in $chosenNames) {
+    $existing = Join-Path $InstallDir $name
+    if (Test-Path $existing) {
+        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        Copy-Item -Path $existing -Destination (Join-Path $backupDir $name) -Force
+    }
+}
 foreach ($name in $chosenNames) {
     Copy-Item -Path (Join-Path $SourceDir $name) -Destination (Join-Path $InstallDir $name) -Force
 }
@@ -191,6 +201,19 @@ $uninstallerSource = Join-Path $PSScriptRoot "Uninstall.ps1"
 if (Test-Path $uninstallerSource) {
     Copy-Item -Path $uninstallerSource -Destination (Join-Path $InstallDir "uninstall.ps1") -Force
 }
+# Record which version was installed so 'update' can compare against GitHub
+$verSource = Join-Path $PSScriptRoot "version.txt"
+if (Test-Path $verSource) {
+    Copy-Item -Path $verSource -Destination (Join-Path $InstallDir "version.txt") -Force
+}
+# Keep a copy of the installer files so 'export' can rebuild an exact, current package.
+# They go in a "package" subfolder so they don't show up as commands in the dashboard or UnderHood.
+$packageDir = Join-Path $InstallDir "package"
+New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+foreach ($f in @("install.ps1", "Uninstall.ps1", "Install-Toolkit.bat", "Uninstall-Toolkit.bat", "version.txt")) {
+    $p = Join-Path $PSScriptRoot $f
+    if (Test-Path $p) { Copy-Item -Path $p -Destination (Join-Path $packageDir $f) -Force }
+}
 
 # Allow locally-installed scripts to run for this user, and strip the
 # "downloaded from the internet" flag so PowerShell doesn't demand a
@@ -202,8 +225,11 @@ if (Test-Path $uninstallerSource) {
 # Before changing anything, save whatever the CurrentUser policy already
 # was, so Uninstall.ps1 can put it back exactly instead of guessing.
 try {
-    $originalPolicy = Get-ExecutionPolicy -Scope CurrentUser
-    $originalPolicy.ToString() | Out-File -FilePath (Join-Path $InstallDir ".policy-backup.txt") -Encoding UTF8 -Force
+    $policyBackup = Join-Path $InstallDir ".policy-backup.txt"
+    # Only save it the FIRST time, so a reinstall can't replace the true original
+    if (-not (Test-Path $policyBackup)) {
+        (Get-ExecutionPolicy -Scope CurrentUser).ToString() | Out-File -FilePath $policyBackup -Encoding UTF8 -Force
+    }
 } catch {
     Write-Warning "Could not record the original execution policy for later restore."
 }

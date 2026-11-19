@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Run commands as Admin. Use 'sudo -off' to disable, 'sudo -on' to enable.
+        Run commands as Admin. Use 'elevate -off' to disable Windows sudo, 'elevate -on' to enable.
 .CATEGORY
     App Control
 .REQUIRESADMIN
